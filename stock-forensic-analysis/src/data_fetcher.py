@@ -199,40 +199,56 @@ class YouComNewsDataFetcher:
     def search_news(self, query: str, num_results: int = 10) -> List[Dict[str, Any]]:
         """
         Search for news articles using You.com API
-        
+
         Args:
             query: Search query
             num_results: Number of results to return
-            
+
         Returns:
             List of news articles
         """
         if not self.api_key:
             print("Warning: You.com API key not configured. Returning empty results.")
             return []
-        
+
         try:
-            endpoint = f"{self.base_url}/search"
+            # Use the dedicated /news endpoint for news queries
+            endpoint = f"{self.base_url}{Config.YOU_API_NEWS_ENDPOINT}"
             params = {
                 'query': query,
-                'num_web_results': num_results,
+                'count': num_results,  # Use 'count' parameter for news endpoint
             }
-            
+
             response = requests.get(
                 endpoint,
                 headers=self.headers,
                 params=params,
                 timeout=10
             )
-            
+
             if response.status_code == 200:
                 data = response.json()
-                
+
                 # Extract news results
                 news_results = []
-                
-                # Check for hits in the response
-                if 'hits' in data:
+
+                # Check for news in the response (news endpoint returns 'news' field)
+                if 'news' in data and 'results' in data['news']:
+                    for result in data['news']['results'][:num_results]:
+                        # Extract source from source_name or meta_url
+                        source = result.get('source_name', '')
+                        if not source and 'meta_url' in result:
+                            source = result['meta_url'].get('hostname', '')
+
+                        news_results.append({
+                            'title': result.get('title', ''),
+                            'description': result.get('description', ''),
+                            'url': result.get('url', ''),
+                            'published_date': result.get('age', result.get('page_age', '')),
+                            'source': source,
+                        })
+                # Fallback: check for hits structure (in case search endpoint is used)
+                elif 'hits' in data:
                     for hit in data['hits'][:num_results]:
                         news_results.append({
                             'title': hit.get('title', ''),
@@ -241,12 +257,19 @@ class YouComNewsDataFetcher:
                             'published_date': hit.get('published_date', ''),
                             'source': hit.get('source', ''),
                         })
-                
+
                 return news_results
+            elif response.status_code == 401:
+                print(f"Error: Invalid You.com API key. Please check your YOU_API_KEY configuration.")
+                return []
+            elif response.status_code == 403:
+                print(f"Error: Access forbidden. Please verify your You.com API key has access to the news endpoint.")
+                return []
             else:
                 print(f"Error fetching news: HTTP {response.status_code}")
+                print(f"Response: {response.text[:200]}")  # Print first 200 chars for debugging
                 return []
-                
+
         except Exception as e:
             print(f"Error searching news: {e}")
             return []
